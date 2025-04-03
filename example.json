@@ -1,0 +1,9 @@
+{
+  "model": "local-completions",
+  "tasks": "mmlu",
+  "model_args": "model=phi3,base_url=http://localhost:8081/v1/completions,num_concurrent=1,max_retries=3,tokenized_requests=False,tokenizer=microsoft/Phi-3",
+  "limit": 1,
+  "env_vars": {
+    "FOO": "BAR"
+  }
+}
