@@ -134,3 +134,7 @@ This deletes all data about the job from /job listing endpoint, and also stops t
 ```bash
 curl -x DELETE "localhost:8080/job/$PID" | jq
 ```
+
+### See OpenAPI
+Hosted at `localhost:8080/docs`:
+![imgs/openapi.png](imgs/openapi.png)
