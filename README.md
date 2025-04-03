@@ -14,7 +14,7 @@ Returns:
 {"status":"success","job_pid":21920}
 ```
 
-The API for configuring the lm-evaluation-harness run matches the CLI arguments to lm-evaluation-harness in JSON form, e.g.:
+The API for requesting an lm-evaluation-harness job will automatically match the lm-eval CLI arguments:
 ```json
 {
   "model": "hf",
