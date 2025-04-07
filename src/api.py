@@ -1,3 +1,4 @@
+import json
 from enum import Enum
 import sys
 from typing import Optional, List, Dict
@@ -74,5 +75,7 @@ def get_model():
 # Dynamically create the lm-eval-harness job request from the library's argparse
 LMEvalRequest = get_model()
 
+
 if __name__ == "__main__":
-    print()
+    with open("LMEvalRequest_schema.json", "w") as f:
+        f.write(json.dumps(LMEvalRequest.model_json_schema()))

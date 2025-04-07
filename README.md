@@ -171,3 +171,13 @@ curl -x DELETE "localhost:8080/jobs" | jq
 ### See OpenAPI
 Hosted at `localhost:8080/docs`:
 ![imgs/openapi.png](imgs/openapi.png)
+
+
+### Creating the LMEvalRequest Data Model
+The LMEvalRequest data type is automatically generated from the cli arguments of the lm-eval package. To export this as 
+a Pydantic data model, run:
+```bash
+python3 -m pip install datamodel-code-generator
+python3 src/api.py
+datamodel-codegen  --input LMEvalRequest_schema.json --input-file-type jsonschema --output model.py
+```
