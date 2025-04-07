@@ -173,7 +173,7 @@ Hosted at `localhost:8080/docs`:
 ![imgs/openapi.png](imgs/openapi.png)
 
 
-### Creating the LMEvalRequest Data Model
+## Creating the LMEvalRequest Data Model
 The LMEvalRequest data type is automatically generated from the cli arguments of the lm-eval package. To export this as 
 a Pydantic data model, run:
 ```bash
