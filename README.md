@@ -73,16 +73,18 @@ Returns:
 {
   "jobs": [
     {
-      "pid": 22457,
+      "job_id": 1,
       "argument": "lm-eval-server/.venv/bin/python3 -m lm_eval --model_args model=phi3,base_url=http://localhost:8081/v1/completions,num_concurrent=1,max_retries=3,tokenized_requests=False,tokenizer=microsoft/Phi-3-mini-4k-instruct --limit 1.0 --model local-completions --tasks mmlu",
       "status": "Running",
+      "timestamp": "2025-04-07T11:03:51.346281+00:00",
       "exit_code": null,
       "inference_progress_pct": 7
     },
     {
-      "pid": 22458,
+      "job_pid": 2,
       "argument": "lm-eval-server/.venv/bin/python3 -m lm_eval --model_args model=phi3,base_url=http://localhost:8081/v1/completions,num_concurrent=1,max_retries=3,tokenized_requests=False,tokenizer=microsoft/Phi-3-mini-4k-instruct --limit 1.0 --model local-completions --tasks mmlu",
       "status": "Completed",
+      "timestamp": "2025-04-07T12:01:15.143251+00:00",
       "exit_code": 0,
       "inference_progress_pct": 100
     }
@@ -98,9 +100,10 @@ Returns:
 {
   "jobs": [
     {
-      "pid": 22457,
+      "pid": 1,
       "argument": "lm-eval-server/.venv/bin/python3 -m lm_eval --model_args model=phi3,base_url=http://localhost:8081/v1/completions,num_concurrent=1,max_retries=3,tokenized_requests=False,tokenizer=microsoft/Phi-3-mini-4k-instruct --limit 1.0 --model local-completions --tasks mmlu",
       "status": "Running",
+      "timestamp": "2025-04-07T11:03:51.346281+00:00",
       "exit_code": null,
       "inference_progress_pct": 7
     }
@@ -111,14 +114,15 @@ Returns:
 
 ### Query a running lm-evaluation-harness job:
 ```bash
-curl localhost:8080/job/$JOB_PID
+curl localhost:8080/job/$JOB_ID
 ```
 Returns:
 ```json
 {
-  "pid": 22457,
+  "job_id": 1,
   "argument": "lm-eval-server/.venv/bin/python3 -m lm_eval --model_args model=phi3,base_url=http://localhost:8081/v1/completions,num_concurrent=1,max_retries=3,tokenized_requests=False,tokenizer=microsoft/Phi-3-mini-4k-instruct --limit 1.0 --model local-completions --tasks mmlu",
   "status": "Running",
+  "timestamp": "2025-04-07T11:03:51.346281+00:00",
   "exit_code": null,
   "inference_progress_pct": 37,
   "stdout": [],
@@ -136,13 +140,13 @@ Returns:
 
 ### Stop a running lm-evaluation-harness job:
 ```bash
-curl "localhost:8080/job/$PID/stop" | jq
+curl "localhost:8080/job/$JOB_ID/stop" | jq
 ```
 
 ### Delete data for an lm-evaluation-harness job:
 This deletes all data about the job from /job listing endpoint, and also stops the job if it is still running.
 ```bash
-curl -x DELETE "localhost:8080/job/$PID" | jq
+curl -x DELETE "localhost:8080/job/$JOB_ID" | jq
 ```
 
 ### Stop all running lm-evaluation-harness job:

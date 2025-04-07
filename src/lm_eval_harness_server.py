@@ -28,11 +28,15 @@ class LMEvalJob:
         self.cumulative_err = []
         self.progress = 0
         self.is_in_queue = True
-        self.has_been_stopped = True
+        self.has_been_stopped = False
 
     def mark_launch(self, process, start_time):
         self.start_time = start_time
         self.process = process
+        self.is_in_queue = False
+        
+    def dequeue(self):
+        self.has_been_stopped = True
         self.is_in_queue = False
 
 
@@ -189,7 +193,7 @@ def list_running_lm_eval_jobs(include_finished: bool=True) -> AllLMEvalJobs:
     return AllLMEvalJobs(jobs=jobs)
 
 
-@router.get("/job/{id}", summary="Get information about a specific job")
+@router.get("/job/{job_id}", summary="Get information about a specific job")
 def check_lm_eval_job(job_id: int) -> LMEvalJobDetail:
     """Get detailed report of an lm-evaluation-harness job by ID"""
 
@@ -246,7 +250,7 @@ def delete_all_lm_eval_job():
     return {"status": "success", "message": f"Jobs {deleted} deleted successfully."}
 
 # === STOP JOBS ====================================================================================
-@router.get("/job/{job_id}/stop", summary="Stop a running lm-evaluation-harness job.")
+@router.get("/job/{job_id}/dequeue", summary="Stop a running lm-evaluation-harness job.")
 def stop_lm_eval_job(job_id: int):
     """Stop an lm-evaluation-harness job by ID"""
 
@@ -255,8 +259,7 @@ def stop_lm_eval_job(job_id: int):
 
     job = job_registry[job_id]
     if job.is_in_queue:
-        job.is_in_queue = False
-        job.has_been_stopped = True
+        job.dequeue()
         return {"status": "success", "message": f"Job {job_id} dequeued successfully."}
     else:
         if not job.has_been_stopped and job.process.poll() is None:
@@ -267,7 +270,7 @@ def stop_lm_eval_job(job_id: int):
             return {"status": "success", "message": f"Job {job_id} has already completed."}
 
 
-@router.get("/jobs/stop", summary="Stop all running lm-evaluation-harness jobs.")
+@router.get("/jobs/dequeue", summary="Stop all running lm-evaluation-harness jobs.")
 def stop_all_lm_eval_job():
     """Stop all lm-evaluation-harness jobs"""
 
