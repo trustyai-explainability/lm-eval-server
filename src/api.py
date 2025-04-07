@@ -1,15 +1,27 @@
+from enum import Enum
 import sys
 from typing import Optional, List, Dict
 from lm_eval.__main__ import setup_parser as lm_eval_setup_parser
 
+
 from pydantic import BaseModel, create_model
+
+
+# ===  JOB STATUSES =================================================================================
+class JobStatus(Enum):
+    RUNNING = "Running"
+    FAILED = "Failed"
+    COMPLETED = "Completed"
+    QUEUED = "Queued"
+    STOPPED = "Stopped"
 
 
 # === STATIC API OBJECTS ===========================================================================
 class LMEvalJobSummary(BaseModel):
-    pid: int
+    job_id: int
     argument: str
-    status: str
+    status: JobStatus
+    timestamp: Optional[str]
     exit_code: Optional[int]
     inference_progress_pct: int
 
@@ -61,3 +73,6 @@ def get_model():
 
 # Dynamically create the lm-eval-harness job request from the library's argparse
 LMEvalRequest = get_model()
+
+if __name__ == "__main__":
+    print()

@@ -5,6 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 import importlib.metadata
 
+from fastapi_utils.tasks import repeat_every
+
 # Endpoint routers
 from src.lm_eval_harness_server import router as eval_router
 
@@ -33,6 +35,7 @@ app.include_router(
     eval_router,
     tags=["Eval"],
 )
+
 
 if __name__ == "__main__":
     uvicorn.run(app=app, host="0.0.0.0", port=8080)

@@ -1,8 +1,18 @@
 # LM-Evaluation-Harness Server
-REST server for running [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/__main__.py) evaluations as subprocess'd jobs.
+REST server for running [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/__main__.py) evaluations as subprocess'd jobs. A maximum number of 
+concurrent job execution slots is is configurable, and jobs will be queued while waiting for an available execution slot. 
 
 ## Launch
 `uv run uvicorn src.main:app --host 0.0.0.0 --port 8080 `
+
+## Launch Enviornment Variables
+* `MAX_CONCURRENCY`: How many jobs can be run in parallel (default=4)
+* `QUEUE_PROCESS_INTERVAL`: The time interval (in seconds) that governs how often to check if new jobs can be executed from the job queue (default=15).
+
+e.g.:
+```bash
+MAX_CONCURRENCY=4 QUEUE_PROCESS_INTERVAL=15 uv run uvicorn src.main:app --host 0.0.0.0 --port 8080
+```
 
 ## Usage
 ### Start an lm-evaluation-harness job:
@@ -133,6 +143,16 @@ curl "localhost:8080/job/$PID/stop" | jq
 This deletes all data about the job from /job listing endpoint, and also stops the job if it is still running.
 ```bash
 curl -x DELETE "localhost:8080/job/$PID" | jq
+```
+
+### Stop all running lm-evaluation-harness job:
+```bash
+curl "localhost:8080/jobs/stop" | jq
+```
+
+### Delete data for all lm-evaluation-harness jobs:
+```bash
+curl -x DELETE "localhost:8080/jobs" | jq
 ```
 
 ### See OpenAPI

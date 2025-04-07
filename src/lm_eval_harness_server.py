@@ -1,9 +1,12 @@
+import datetime
 import os
-import sys
+import queue
 import shlex
+import threading
+from contextlib import asynccontextmanager
 
 from fastapi import HTTPException
-from typing import Dict
+from fastapi_utils.tasks import repeat_every
 from src.api import *
 
 from fastapi import APIRouter
@@ -12,18 +15,43 @@ import logging
 
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
-
 
 # === Registry of running lm-eval-harness jobs =====================================================
 class LMEvalJob:
-    def __init__(self, process, argument):
-        self.process = process
+    def __init__(self, job_id, request, argument):
+        self.job_id = job_id
+        self.process = None
+        self.request = request
         self.argument = argument
+        self.start_time = None
         self.cumulative_out = []
         self.cumulative_err = []
         self.progress = 0
-running_processes : Dict[int, LMEvalJob] = {}  # track all currently running jobs
+        self.is_in_queue = True
+        self.has_been_stopped = True
+
+    def mark_launch(self, process, start_time):
+        self.start_time = start_time
+        self.process = process
+        self.is_in_queue = False
+
+
+job_registry : Dict[int, LMEvalJob] = {}  # track all jobs
+job_queue = queue.Queue()
+ID_LOCK = threading.Lock()
+LAST_ID = 0
+
+
+# === ENV VARIABLE PARSING =========================================================================
+try:
+    MAX_CONCURRENCY = int(os.environ.get("MAX_CONCURRENCY", 4))
+except ValueError:
+    MAX_CONCURRENCY = 4
+
+try:
+    QUEUE_PROCESS_INTERVAL = int(os.environ.get("QUEUE_PROCESS_INTERVAL", 15))
+except ValueError:
+    QUEUE_PROCESS_INTERVAL = 15
 
 
 # === HELPERS ======================================================================================
@@ -50,15 +78,77 @@ def convert_to_cli(request: LMEvalRequest):
 
 def _get_job_status(job):
     """Poll a running subprocess for exit codes"""
-    status_code = job.process.poll()
-    if status_code == 0:
-        status = "Completed"
-    elif status_code is None:
-       status = "Running"
+    if job.is_in_queue:
+        status = JobStatus.QUEUED
+        status_code = None
+    elif job.has_been_stopped:
+        status = JobStatus.STOPPED
+        status_code = None
     else:
-        status = "Error"
+        status_code = job.process.poll()
+        if status_code == 0:
+            status = JobStatus.COMPLETED
+        elif status_code is None:
+           status = JobStatus.RUNNING
+        else:
+            status = JobStatus.FAILED
 
     return status, status_code
+
+
+def _generate_job_id():
+    """Generate a unique job id"""
+    with ID_LOCK:
+        global LAST_ID
+        LAST_ID += 1
+        id_to_return = LAST_ID
+    return id_to_return
+
+
+# === Queuing ======================================================================================
+def _get_num_running_jobs():
+    """Get the number of currently running jobs"""
+    jobs = list_running_lm_eval_jobs(include_finished=False).jobs
+    jobs = [job for job in jobs if job.status==JobStatus.RUNNING]
+    return len(jobs)
+
+
+@repeat_every(seconds=QUEUE_PROCESS_INTERVAL, logger=logger)
+async def _process_queue():
+    """Check the job queue for pending jobs and launch them if there are available execution slots"""
+    logger.debug(f"Queue processing: num_running_jobs: {_get_num_running_jobs()}, job queue size: {job_queue.qsize()}")
+    while _get_num_running_jobs() < MAX_CONCURRENCY and job_queue.qsize() > 0:
+        job_to_run = job_registry.get(job_queue.get())
+        if job_to_run is not None and job_to_run.is_in_queue:
+            logger.info(f"Launching job {job_to_run.job_id}")
+            _launch_job(job_to_run)
+
+
+def _launch_job(job: LMEvalJob):
+    """Launch a job"""
+    logger.debug(f"Running command:       {job.argument}")
+    logger.debug(f"Environment variables: {job.request.env_vars}")
+
+    # todo: verify that you can't inject commands here
+    p = subprocess.Popen(shlex.split(job.argument), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    os.set_blocking(p.stdout.fileno(), False)
+    os.set_blocking(p.stderr.fileno(), False)
+
+    # register the subprocess in the global registry
+    job_registry[job.job_id].mark_launch(
+        process=p,
+        start_time=datetime.datetime.now(datetime.timezone.utc).isoformat()
+    )
+
+
+# === ROUTER =======================================================================================
+@asynccontextmanager
+async def lifespan(app):
+    """Launch recurring queue processing function"""
+    await _process_queue()
+    yield
+
+router = APIRouter(lifespan=lifespan)
 
 
 # === API ==========================================================================================
@@ -70,59 +160,61 @@ def lm_eval_job(request: LMEvalRequest):
     # convert the json to cli arguments
     cli_cmd = convert_to_cli(request)
 
-    logger.debug(f"Running command:       {cli_cmd}")
-    logger.debug(f"Environment variables: {request.env_vars}")
+    # store job
+    job_id = _generate_job_id()
+    queued_job = LMEvalJob(
+        job_id=job_id,
+        request=request,
+        argument=cli_cmd
+    )
+    job_queue.put(job_id)
+    job_registry[job_id] = queued_job
+
+    return {"status": "success", "message":f"Job {job_id} successfully queued.", "job_id": job_id}
 
 
-    # todo: make sure you can't inject commands here
-    p = subprocess.Popen(shlex.split(cli_cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    os.set_blocking(p.stdout.fileno(), False)
-    os.set_blocking(p.stderr.fileno(), False)
-
-    # register the subprocess in the global registry
-    running_processes[p.pid] = LMEvalJob(p, cli_cmd)
-
-    return {"status": "success", "job_pid": p.pid}
-
-
-
+# === METADATA =====================================================================================
 @router.get("/jobs", summary="List all running jobs")
 def list_running_lm_eval_jobs(include_finished: bool=True) -> AllLMEvalJobs:
     """Provide a list of all lm-evaluation-harness jobs with attached summary information"""
 
     jobs = []
-    for pid, job in running_processes.items():
+    for pid, job in job_registry.items():
         job_information = check_lm_eval_job(pid)
 
-        if not include_finished and job_information.exit_code is not None:
+        if not include_finished and job_information.status not in {JobStatus.RUNNING, JobStatus.FAILED}:
             continue
         jobs.append(LMEvalJobSummary(**job_information.model_dump(exclude={"stdout", "stderr"})))
 
     return AllLMEvalJobs(jobs=jobs)
 
 
-@router.get("/job/{pid}", summary="Get information about a specific job")
-def check_lm_eval_job(pid: int) -> LMEvalJobDetail:
-    """Get detailed report of an lm-evaluation-harness job by PID"""
+@router.get("/job/{id}", summary="Get information about a specific job")
+def check_lm_eval_job(job_id: int) -> LMEvalJobDetail:
+    """Get detailed report of an lm-evaluation-harness job by ID"""
 
-    if pid not in running_processes:
-        raise HTTPException(status_code=400, detail=f"No lm-evaluation-harness job with PID={pid} found.")
+    if job_id not in job_registry:
+        raise HTTPException(status_code=400, detail=f"No lm-evaluation-harness job with ID={job_id} found.")
 
-    job = running_processes[pid]
+    job = job_registry[job_id]
     status, status_code = _get_job_status(job)
 
-    job.cumulative_out += [line for line in job.process.stdout]
-    job.cumulative_err += [line for line in job.process.stderr]
-
     progress = 0
-    for line in reversed(job.cumulative_err):
-        if line.startswith("Requesting API:"):
-            progress = int(line.split("Requesting API:")[1].split("%")[0].strip())
-            break
-    job.progress = progress
+    if not job.is_in_queue and job.process is not None:
+        job.cumulative_out += [line.strip() for line in job.process.stdout]
+        job.cumulative_err += [line.strip() for line in job.process.stderr]
+
+        for line in reversed(job.cumulative_err):
+            if line.startswith("Requesting API:"):
+                progress = int(line.split("Requesting API:")[1].split("%")[0].strip())
+                break
+
+        job.progress = progress
+
     return LMEvalJobDetail(
-        pid=pid,
+        job_id=job_id,
         argument=job.argument,
+        timestamp=job.start_time,
         status=status,
         exit_code=status_code,
         inference_progress_pct=job.progress,
@@ -131,31 +223,58 @@ def check_lm_eval_job(pid: int) -> LMEvalJobDetail:
     )
 
 
-@router.delete("/job/{pid}", summary="Delete an lm-evaluation-harness job's data from the server.")
-def delete_lm_eval_job(pid: int):
-    """Delete an lm-evaluation-harness job's data from the server by PID, terminating the job if it's still running"""
-    if pid not in running_processes:
-        raise HTTPException(status_code=400, detail=f"No lm-evaluation-harness job with PID={pid} found.")
+# === DELETE DATA ==================================================================================
+@router.delete("/job/{id}", summary="Delete an lm-evaluation-harness job's data from the server.")
+def delete_lm_eval_job(job_id: int):
+    """Delete an lm-evaluation-harness job's data from the server by ID, terminating the job if it's still running"""
+    if job_id not in job_registry:
+        raise HTTPException(status_code=400, detail=f"No lm-evaluation-harness job with ID={job_id} found.")
 
-    stop_lm_eval_job(pid)
-    del running_processes[pid]
-    return {"status": "success", "message": f"Job {pid} deleted successfully."}
+    stop_lm_eval_job(job_id)
+    del job_registry[job_id]
+    return {"status": "success", "message": f"Job {job_id} deleted successfully."}
 
+@router.delete("/jobs", summary="Delete data from all lm-evaluation-harness jobs from the server.")
+def delete_all_lm_eval_job():
+    """Delete data from all lm-evaluation-harness job's data from the server, terminating any job that its still running"""
 
-@router.get("/job/{pid}/stop", summary="Stop a running lm-evaluation-harness job.")
-def stop_lm_eval_job(pid: int):
-    """Terminate an lm-evaluation-harness job by PID"""
+    deleted = []
+    for job_id in job_registry.keys():
+        stop_lm_eval_job(job_id)
+        deleted.append(job_id)
+    job_registry.clear()
+    return {"status": "success", "message": f"Jobs {deleted} deleted successfully."}
 
-    if pid not in running_processes:
-        raise HTTPException(status_code=400, detail=f"No lm-evaluation-harness job with PID={pid} found.")
+# === STOP JOBS ====================================================================================
+@router.get("/job/{job_id}/stop", summary="Stop a running lm-evaluation-harness job.")
+def stop_lm_eval_job(job_id: int):
+    """Stop an lm-evaluation-harness job by ID"""
 
-    job = running_processes[pid]
+    if job_id not in job_registry:
+        raise HTTPException(status_code=400, detail=f"No lm-evaluation-harness job with ID={job_id} found.")
 
-    if job.process.poll() is None:
-        job.process.terminate()
-        return {"status": "success", "message": f"Job {pid} terminated successfully."}
+    job = job_registry[job_id]
+    if job.is_in_queue:
+        job.is_in_queue = False
+        job.has_been_stopped = True
+        return {"status": "success", "message": f"Job {job_id} dequeued successfully."}
     else:
-        return {"status": "success", "message": f"Job {pid} has already completed."}
+        if not job.has_been_stopped and job.process.poll() is None:
+            job.process.terminate()
+            job.has_been_stopped = True
+            return {"status": "success", "message": f"Job {job_id} stopped successfully."}
+        else:
+            return {"status": "success", "message": f"Job {job_id} has already completed."}
 
 
+@router.get("/jobs/stop", summary="Stop all running lm-evaluation-harness jobs.")
+def stop_all_lm_eval_job():
+    """Stop all lm-evaluation-harness jobs"""
+
+    stopped = []
+    for job_id in job_registry.keys():
+        stop_lm_eval_job(job_id)
+        stopped.append(job_id)
+
+    return {"status": "success", "message": f"Jobs {stopped} stopped successfully."}
 
