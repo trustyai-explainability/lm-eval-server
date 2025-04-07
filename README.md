@@ -21,7 +21,7 @@ curl localhost:8080/job -H "Content-Type: application/json" -d @example.json
 ```
 Returns:
 ```json
-{"status":"success","job_pid":21920}
+{"status":"success","message":"Job 1 successfully queued.","job_id":1}
 ```
 
 The API for requesting an lm-evaluation-harness job will automatically match the lm-eval CLI arguments:
