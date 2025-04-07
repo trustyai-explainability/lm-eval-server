@@ -3,7 +3,16 @@ REST server for running [lm-evaluation-harness](https://github.com/EleutherAI/lm
 concurrent job execution slots is is configurable, and jobs will be queued while waiting for an available execution slot. 
 
 ## Launch
-`uv run uvicorn src.main:app --host 0.0.0.0 --port 8080 `
+```bash
+uv run uvicorn src.main:app --host 0.0.0.0 --port 8080
+```
+or
+```bash
+docker run -p 8080:8080 quay.io/trustyai/lm-eval-server:latest
+```
+```bash
+podman run -p 8080:8080 quay.io/trustyai/lm-eval-server:latest
+```
 
 ## Launch Enviornment Variables
 * `MAX_CONCURRENCY`: How many jobs can be run in parallel (default=4)
@@ -24,7 +33,7 @@ Returns:
 {"status":"success","message":"Job 1 successfully queued.","job_id":1}
 ```
 
-The API for requesting an lm-evaluation-harness job will automatically match the lm-eval CLI arguments:
+The API for requesting an lm-evaluation-harness job is automatically derived from the lm-eval CLI arguments:
 ```json
 {
   "model": "hf",
